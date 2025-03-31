@@ -11,6 +11,7 @@ import time
 from threading import Thread
 
 from PySide6 import QtWidgets, QtCore, QtGui
+from PySide6.QtGui import QIcon
 from PySide6.QtCore import QTimer, Signal, Slot, QFileSystemWatcher
 import openai
 
@@ -151,6 +152,7 @@ class PixelPolygot(QtWidgets.QMainWindow):
     
     def init_ui(self):
         self.setWindowTitle("PixelPolygot")
+        self.setWindowIcon(QIcon("resources/PixelPolygot.png"))
         self.resize(800, 600)
         
         # Central widget
