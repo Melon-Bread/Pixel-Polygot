@@ -97,8 +97,9 @@ class SettingsDialog(QtWidgets.QDialog):
         
         form_layout = QtWidgets.QFormLayout()
         
-       # API Key
+        # API Key
         self.api_key_input = QtWidgets.QLineEdit(self.config["api_key"])
+        self.api_key_input.setToolTip("Your unique API key from your provider.\nCan be left black if self hosting typically.")
         self.api_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
         self.show_api_key_checkbox = QtWidgets.QCheckBox("Show")
         self.show_api_key_checkbox.toggled.connect(self.toggle_api_key_echo)
@@ -109,14 +110,17 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # API URL
         self.api_url_input = QtWidgets.QLineEdit(self.config["api_url"])
+        self.api_url_input.setToolTip("Must be a OpenAI compatabile API for the image to send.")
         form_layout.addRow("API URL:", self.api_url_input)
         
         # Model
         self.model_input = QtWidgets.QLineEdit(self.config["model"])
+        self.model_input.setToolTip("Single name of the model you to send the image to.\nSee you API docs for a list of model names that support vision.")
         form_layout.addRow("Model:", self.model_input)
         
         # Prompt
         self.prompt_input = QtWidgets.QTextEdit()
+        self.prompt_input.setToolTip("Instructions that get sent to the model.\n'Better' prompt, 'better' results.")
         self.prompt_input.setPlainText(self.config["prompt"])
         self.prompt_input.setMinimumHeight(100)
         form_layout.addRow("Prompt:", self.prompt_input)
@@ -124,6 +128,7 @@ class SettingsDialog(QtWidgets.QDialog):
         # Watch Directory
         self.directory_layout = QtWidgets.QHBoxLayout()
         self.directory_input = QtWidgets.QLineEdit(self.config.get("watch_directory", ""))
+        self.directory_input.setToolTip("Only watches when new images get placed for auto upload/translation.")
         self.directory_button = QtWidgets.QPushButton("Browse...")
         self.directory_button.clicked.connect(self.select_directory)
         self.directory_layout.addWidget(self.directory_input)
@@ -218,6 +223,7 @@ class PixelPolygot(QtWidgets.QMainWindow):
         
         # Regenerate button
         self.regenerate_button = QtWidgets.QPushButton("Regenerate Response")
+        self.regenerate_button.setToolTip("Resend the current image to the API.\nUseful for if API fails or bad response.")
         self.regenerate_button.clicked.connect(self.regenerate_response)
         self.regenerate_button.setEnabled(False)
         
