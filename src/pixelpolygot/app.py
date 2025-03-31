@@ -34,6 +34,9 @@ class FileWatcher(QtCore.QObject):
         self.watcher.addPath(directory)
         self.watcher.directoryChanged.connect(self.on_directory_changed)
         self.known_files = set(self.get_image_files())
+        self.processing_timer = QTimer()
+        self.processing_timer.setSingleShot(True)
+        self.processing_timer.timeout.connect(self.process_new_files)
         print(f"Watching {directory} for changes")
 
     def get_image_files(self):
@@ -45,16 +48,42 @@ class FileWatcher(QtCore.QObject):
         ]
 
     def on_directory_changed(self, path):
-        current_files = set(self.get_image_files())
-        new_files = current_files - self.known_files
-        
-        if new_files:
-            # Sort by creation time to get the newest
-            newest_file = sorted(new_files, key=os.path.getctime, reverse=True)[0]
-            self.file_changed.emit(newest_file)
-            print(f"New image detected: {newest_file}")
-        
-        self.known_files = current_files
+        # Start a timer to delay processing by a short amount
+        # This allows the screenshot to finish saving
+        self.processing_timer.start(500)  # 500ms delay
+    
+    def process_new_files(self):
+        try:
+            current_files = set(self.get_image_files())
+            new_files = current_files - self.known_files
+            
+            if new_files:
+                # Sort by creation time to get the newest
+                newest_file = sorted(new_files, key=os.path.getctime, reverse=True)[0]
+                
+                # Verify file is not empty and accessible
+                if os.path.getsize(newest_file) > 0:
+                    # Additional small delay to ensure file is fully written
+                    time.sleep(0.2)
+                    self.file_changed.emit(newest_file)
+                    print(f"New image detected: {newest_file}")
+                else:
+                    # If file appears to be empty, try again after a delay
+                    QTimer.singleShot(500, lambda: self.check_file_again(newest_file))
+            
+            self.known_files = current_files
+        except Exception as e:
+            print(f"Error processing new files: {e}")
+    
+    def check_file_again(self, file_path):
+        # Second attempt to read the file after a delay
+        try:
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                self.file_changed.emit(file_path)
+                print(f"New image detected (retry): {file_path}")
+                self.known_files = set(self.get_image_files())
+        except Exception as e:
+            print(f"Error in second attempt to read file: {e}")
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -241,7 +270,15 @@ class PixelPolygot(QtWidgets.QMainWindow):
     
     @Slot(str)
     def on_new_image(self, file_path):
-        self.process_image(file_path)
+        # Check if file still exists and is accessible
+        if os.path.exists(file_path) and os.access(file_path, os.R_OK):
+            try:
+                self.process_image(file_path)
+            except Exception as e:
+                self.statusBar().showMessage(f"Error processing new image: {str(e)}")
+                print(f"Error processing new image: {e}")
+        else:
+            self.statusBar().showMessage(f"File no longer exists or inaccessible: {os.path.basename(file_path)}")
     
     def process_image(self, file_path):
         self.current_image_path = file_path
