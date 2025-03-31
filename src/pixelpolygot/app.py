@@ -97,10 +97,15 @@ class SettingsDialog(QtWidgets.QDialog):
         
         form_layout = QtWidgets.QFormLayout()
         
-        # API Key
+       # API Key
         self.api_key_input = QtWidgets.QLineEdit(self.config["api_key"])
         self.api_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-        form_layout.addRow("API Key:", self.api_key_input)
+        self.show_api_key_checkbox = QtWidgets.QCheckBox("Show")
+        self.show_api_key_checkbox.toggled.connect(self.toggle_api_key_echo)
+        api_key_layout = QtWidgets.QHBoxLayout()
+        api_key_layout.addWidget(self.api_key_input)
+        api_key_layout.addWidget(self.show_api_key_checkbox)
+        form_layout.addRow("API Key:", api_key_layout)
         
         # API URL
         self.api_url_input = QtWidgets.QLineEdit(self.config["api_url"])
@@ -134,14 +139,20 @@ class SettingsDialog(QtWidgets.QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
-    
+
+    def toggle_api_key_echo(self, checked):
+        if checked:
+            self.api_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Normal)
+        else:
+            self.api_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+
     def select_directory(self):
         directory = QtWidgets.QFileDialog.getExistingDirectory(
             self, "Select Directory to Watch", self.directory_input.text()
         )
         if directory:
             self.directory_input.setText(directory)
-    
+
     def get_settings(self):
         return {
             "api_key": self.api_key_input.text(),
