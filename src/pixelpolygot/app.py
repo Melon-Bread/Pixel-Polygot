@@ -99,6 +99,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # API Key
         self.api_key_input = QtWidgets.QLineEdit(self.config["api_key"])
+        self.api_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
         form_layout.addRow("API Key:", self.api_key_input)
         
         # API URL
