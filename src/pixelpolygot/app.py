@@ -20,7 +20,8 @@ DEFAULT_CONFIG = {
     "api_key": "<YOUR_API_KEY_HERE>",
     "api_url": "http://localhost:9009",
     "model": "qwen2.5-vl-7b-instruct",
-    "prompt": "What is the Japanese text in this image and what does it mean in English?"
+    "prompt": "What is the Japanese text in this image and what does it mean in English?",
+    "api_type": "openai"  # Add this line
 }
 
 
@@ -97,6 +98,18 @@ class SettingsDialog(QtWidgets.QDialog):
         
         form_layout = QtWidgets.QFormLayout()
         
+        # API Type
+        self.api_type_combo = QtWidgets.QComboBox()
+        self.api_type_combo.addItems(["OpenAI", "Ollama"])
+        self.api_type_combo.setCurrentText(self.config.get("api_type", "openai").title())
+        self.api_type_combo.setToolTip("Select the type of API to use:\nOpenAI - For OpenAI compatible APIs\nOllama - For local Ollama instance")
+        form_layout.addRow("API Type:", self.api_type_combo)
+        
+        # API URL
+        self.api_url_input = QtWidgets.QLineEdit(self.config["api_url"])
+        self.api_url_input.setToolTip("Must be a OpenAI compatabile API for the image to send.")
+        form_layout.addRow("API URL:", self.api_url_input)
+        
         # API Key
         self.api_key_input = QtWidgets.QLineEdit(self.config["api_key"])
         self.api_key_input.setToolTip("Your unique API key from your provider.\nCan be left black if self hosting typically.")
@@ -107,11 +120,6 @@ class SettingsDialog(QtWidgets.QDialog):
         api_key_layout.addWidget(self.api_key_input)
         api_key_layout.addWidget(self.show_api_key_checkbox)
         form_layout.addRow("API Key:", api_key_layout)
-        
-        # API URL
-        self.api_url_input = QtWidgets.QLineEdit(self.config["api_url"])
-        self.api_url_input.setToolTip("Must be a OpenAI compatabile API for the image to send.")
-        form_layout.addRow("API URL:", self.api_url_input)
         
         # Model
         self.model_input = QtWidgets.QLineEdit(self.config["model"])
@@ -164,7 +172,8 @@ class SettingsDialog(QtWidgets.QDialog):
             "api_url": self.api_url_input.text(),
             "model": self.model_input.text(),
             "prompt": self.prompt_input.toPlainText(),
-            "watch_directory": self.directory_input.text()
+            "watch_directory": self.directory_input.text(),
+            "api_type": self.api_type_combo.currentText().lower()
         }
 
 
@@ -328,95 +337,146 @@ class PixelPolygot(QtWidgets.QMainWindow):
     
     def _api_request(self, file_path):
         try:
-            # Create a fresh client for each request to ensure we use the latest config
-            client = openai.OpenAI(
-                api_key=self.config["api_key"],
-                base_url=self.config["api_url"]
-            )
-            
-            # Debug info
-            print(f"Using API URL: {self.config['api_url']}")
-            print(f"Using model: {self.config['model']}")
-            
-            # Determine model type
-            model_name = self.config["model"].lower()
-            is_qwen = "qwen" in model_name
-            is_dashscope = "dashscope" in self.config["api_url"].lower()
-            use_streaming = is_qwen or model_name.endswith("-omni-7b")
-            
-            try:
-                # Prepare image - read as binary data
+            if self.config["api_type"] == "ollama":
+                # Use requests for Ollama API
+                import requests
+                import base64
+                
+                # Read and encode image
                 with open(file_path, "rb") as image_file:
                     image_data = image_file.read()
-                
-                # For Qwen/DashScope models, encode image as base64 string
                 image_base64 = base64.b64encode(image_data).decode("utf-8")
                 
-                # Structure image data correctly based on the model/API
-                if is_qwen or is_dashscope:
-                    # For DashScope/Qwen models
-                    image_url = {
-                        "url": f"data:image/jpeg;base64,{image_base64}"
-                    }
-                else:
-                    # For OpenAI and other models with 'detail' parameter
-                    image_url = {
-                        "url": f"data:image/jpeg;base64,{image_base64}",
-                        "detail": "high"
-                    }
-                
-                # Create system message
-                system_message = {"role": "system", "content": "You are a helpful assistant."}
-                
-                # Create user message with text and image
-                user_message = {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": self.config["prompt"]},
-                        {"type": "image_url", "image_url": image_url}
-                    ]
+                # Prepare request body
+                api_url = f"{self.config['api_url'].rstrip('/')}/api/chat"
+                payload = {
+                    "model": self.config["model"],
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": self.config["prompt"],
+                            "images": [image_base64]
+                        }
+                    ],
+                    "stream": True  # Enable streaming for better UX
                 }
                 
-                # Make API request
-                if use_streaming:
-                    # Streaming request
-                    response = client.chat.completions.create(
-                        model=self.config["model"],
-                        messages=[system_message, user_message],
-                        max_tokens=1000,
-                        stream=True
-                    )
+                try:
+                    response = requests.post(api_url, json=payload, stream=True)
+                    response.raise_for_status()
                     
-                    # Process streaming response
                     full_response = ""
-                    for chunk in response:
-                        if chunk.choices[0].delta.content:
-                            content = chunk.choices[0].delta.content
-                            full_response += content
-                            # Update UI with partial response
-                            self.api_response_ready.emit(full_response)
+                    for line in response.iter_lines():
+                        if line:
+                            try:
+                                json_response = json.loads(line)
+                                if json_response.get("message", {}).get("content"):
+                                    content = json_response["message"]["content"]
+                                    full_response += content
+                                    # Update UI with partial response
+                                    self.api_response_ready.emit(full_response)
+                            except json.JSONDecodeError:
+                                continue
                     
                     # Final update if needed
                     if not full_response:
-                        self.api_response_ready.emit("No response content received.")
-                
-                else:
-                    # Non-streaming request
-                    response = client.chat.completions.create(
-                        model=self.config["model"],
-                        messages=[system_message, user_message],
-                        max_tokens=1000
-                    )
+                        self.api_response_ready.emit("No response content received from Ollama.")
                     
-                    # Get response content
-                    result = response.choices[0].message.content
-                    self.api_response_ready.emit(result)
+                except requests.exceptions.RequestException as e:
+                    error_message = f"Ollama API Request Error: {str(e)}"
+                    print(error_message)
+                    self.api_response_ready.emit(error_message)
+                    
+            else:
+                # Existing OpenAI API code...
+                client = openai.OpenAI(
+                    api_key=self.config["api_key"],
+                    base_url=self.config["api_url"]
+                )
                 
-            except Exception as e:
-                error_message = f"API Request Error: {str(e)}"
-                print(error_message)
-                self.api_response_ready.emit(error_message)
-            
+                # Debug info
+                print(f"Using API URL: {self.config['api_url']}")
+                print(f"Using model: {self.config['model']}")
+                
+                # Determine model type
+                model_name = self.config["model"].lower()
+                is_qwen = "qwen" in model_name
+                is_dashscope = "dashscope" in self.config["api_url"].lower()
+                use_streaming = is_qwen or model_name.endswith("-omni-7b")
+                
+                try:
+                    # Prepare image - read as binary data
+                    with open(file_path, "rb") as image_file:
+                        image_data = image_file.read()
+                    
+                    # For Qwen/DashScope models, encode image as base64 string
+                    image_base64 = base64.b64encode(image_data).decode("utf-8")
+                    
+                    # Structure image data correctly based on the model/API
+                    if is_qwen or is_dashscope:
+                        # For DashScope/Qwen models
+                        image_url = {
+                            "url": f"data:image/jpeg;base64,{image_base64}"
+                        }
+                    else:
+                        # For OpenAI and other models with 'detail' parameter
+                        image_url = {
+                            "url": f"data:image/jpeg;base64,{image_base64}",
+                            "detail": "high"
+                        }
+                    
+                    # Create system message
+                    system_message = {"role": "system", "content": "You are a helpful assistant."}
+                    
+                    # Create user message with text and image
+                    user_message = {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": self.config["prompt"]},
+                            {"type": "image_url", "image_url": image_url}
+                        ]
+                    }
+                    
+                    # Make API request
+                    if use_streaming:
+                        # Streaming request
+                        response = client.chat.completions.create(
+                            model=self.config["model"],
+                            messages=[system_message, user_message],
+                            max_tokens=1000,
+                            stream=True
+                        )
+                        
+                        # Process streaming response
+                        full_response = ""
+                        for chunk in response:
+                            if chunk.choices[0].delta.content:
+                                content = chunk.choices[0].delta.content
+                                full_response += content
+                                # Update UI with partial response
+                                self.api_response_ready.emit(full_response)
+                        
+                        # Final update if needed
+                        if not full_response:
+                            self.api_response_ready.emit("No response content received.")
+                    
+                    else:
+                        # Non-streaming request
+                        response = client.chat.completions.create(
+                            model=self.config["model"],
+                            messages=[system_message, user_message],
+                            max_tokens=1000
+                        )
+                        
+                        # Get response content
+                        result = response.choices[0].message.content
+                        self.api_response_ready.emit(result)
+                    
+                except Exception as e:
+                    error_message = f"API Request Error: {str(e)}"
+                    print(error_message)
+                    self.api_response_ready.emit(error_message)
+                
         except Exception as e:
             error_message = f"Error: {str(e)}"
             print(error_message)
