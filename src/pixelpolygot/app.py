@@ -393,7 +393,6 @@ class PixelPolygot(QtWidgets.QMainWindow):
             if self.config["api_type"] == "ollama":
                 # Use requests for Ollama API
                 import requests
-                import base64
 
                 # Read and encode image
                 with open(file_path, "rb") as image_file:
@@ -572,3 +571,4 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     main_window = PixelPolygot()
     sys.exit(app.exec())
+
