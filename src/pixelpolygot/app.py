@@ -16,7 +16,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtCore import QTimer, Signal, Slot, QFileSystemWatcher
 import openai
 
-CONFIG_FILE = "config.json"
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 DEFAULT_CONFIG = {
     "api_key": "<YOUR_API_KEY_HERE>",
     "api_url": "http://localhost:9009/v1",
