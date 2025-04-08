@@ -390,150 +390,132 @@ class PixelPolygot(QtWidgets.QMainWindow):
 
     def _api_request(self, file_path):
         try:
+            image_base64 = self._read_image_base64(file_path)
             if self.config["api_type"] == "ollama":
-                # Use requests for Ollama API
-                import requests
-
-                # Read and encode image
-                with open(file_path, "rb") as image_file:
-                    image_data = image_file.read()
-                image_base64 = base64.b64encode(image_data).decode("utf-8")
-
-                # Prepare request body
-                api_url = f"{self.config['api_url'].rstrip('/')}/api/chat"
-                payload = {
-                    "model": self.config["model"],
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": self.config["prompt"],
-                            "images": [image_base64],
-                        }
-                    ],
-                    "stream": True,  # Enable streaming for better UX
-                }
-
-                try:
-                    response = requests.post(api_url, json=payload, stream=True)
-                    response.raise_for_status()
-
-                    full_response = ""
-                    for line in response.iter_lines():
-                        if line:
-                            try:
-                                json_response = json.loads(line)
-                                if json_response.get("message", {}).get("content"):
-                                    content = json_response["message"]["content"]
-                                    full_response += content
-                                    # Update UI with partial response
-                                    self.api_response_ready.emit(full_response)
-                            except json.JSONDecodeError:
-                                continue
-
-                    # Final update if needed
-                    if not full_response:
-                        self.api_response_ready.emit(
-                            "No response content received from Ollama."
-                        )
-
-                except requests.exceptions.RequestException as e:
-                    error_message = f"Ollama API Request Error: {str(e)}"
-                    print(error_message)
-                    self.api_response_ready.emit(error_message)
-
+                self._request_ollama(image_base64)
             else:
-                client = openai.OpenAI(
-                    api_key=self.config["api_key"], base_url=self.config["api_url"]
-                )
-
-                # Debug info
-                print(f"Using API URL: {self.config['api_url']}")
-                print(f"Using model: {self.config['model']}")
-
-                # Determine model type
-                model_name = self.config["model"].lower()
-                is_qwen = "qwen" in model_name
-                is_dashscope = "dashscope" in self.config["api_url"].lower()
-                use_streaming = is_qwen or model_name.endswith("-omni-7b")
-
-                try:
-                    # Prepare image - read as binary data
-                    with open(file_path, "rb") as image_file:
-                        image_data = image_file.read()
-
-                    # For Qwen/DashScope models, encode image as base64 string
-                    image_base64 = base64.b64encode(image_data).decode("utf-8")
-
-                    # Structure image data correctly based on the model/API
-                    if is_qwen or is_dashscope:
-                        # For DashScope/Qwen models
-                        image_url = {"url": f"data:image/jpeg;base64,{image_base64}"}
-                    else:
-                        # For OpenAI and other models with 'detail' parameter
-                        image_url = {
-                            "url": f"data:image/jpeg;base64,{image_base64}",
-                            "detail": "high",
-                        }
-
-                    # Create system message
-                    system_message = {
-                        "role": "system",
-                        "content": "You are a helpful assistant.",
-                    }
-
-                    # Create user message with text and image
-                    user_message = {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": self.config["prompt"]},
-                            {"type": "image_url", "image_url": image_url},
-                        ],
-                    }
-
-                    # Make API request
-                    if use_streaming:
-                        # Streaming request
-                        response = client.chat.completions.create(
-                            model=self.config["model"],
-                            messages=[system_message, user_message],
-                            max_tokens=1000,
-                            stream=True,
-                        )
-
-                        # Process streaming response
-                        full_response = ""
-                        for chunk in response:
-                            if chunk.choices[0].delta.content:
-                                content = chunk.choices[0].delta.content
-                                full_response += content
-                                # Update UI with partial response
-                                self.api_response_ready.emit(full_response)
-
-                        # Final update if needed
-                        if not full_response:
-                            self.api_response_ready.emit(
-                                "No response content received."
-                            )
-
-                    else:
-                        # Non-streaming request
-                        response = client.chat.completions.create(
-                            model=self.config["model"],
-                            messages=[system_message, user_message],
-                            max_tokens=1000,
-                        )
-
-                        # Get response content
-                        result = response.choices[0].message.content
-                        self.api_response_ready.emit(result)
-
-                except Exception as e:
-                    error_message = f"API Request Error: {str(e)}"
-                    print(error_message)
-                    self.api_response_ready.emit(error_message)
-
+                self._request_openai(image_base64)
         except Exception as e:
             error_message = f"Error: {str(e)}"
+            print(error_message)
+            self.api_response_ready.emit(error_message)
+
+    def _read_image_base64(self, file_path):
+        with open(file_path, "rb") as image_file:
+            image_data = image_file.read()
+        return base64.b64encode(image_data).decode("utf-8")
+
+    def _request_ollama(self, image_base64):
+        import requests
+
+        api_url = f"{self.config['api_url'].rstrip('/')}/api/chat"
+        payload = {
+            "model": self.config["model"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": self.config["prompt"],
+                    "images": [image_base64],
+                }
+            ],
+            "stream": True,
+        }
+
+        try:
+            response = requests.post(api_url, json=payload, stream=True, timeout=30)
+            response.raise_for_status()
+
+            full_response = ""
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        json_response = json.loads(line)
+                        if json_response.get("message", {}).get("content"):
+                            content = json_response["message"]["content"]
+                            full_response += content
+                            self.api_response_ready.emit(full_response)
+                    except json.JSONDecodeError:
+                        continue
+
+            if not full_response:
+                self.api_response_ready.emit(
+                    "No response content received from Ollama."
+                )
+
+        except requests.exceptions.RequestException as e:
+            error_message = f"Ollama API Request Error: {str(e)}"
+            print(error_message)
+            self.api_response_ready.emit(error_message)
+
+    def _request_openai(self, image_base64):
+        client = openai.OpenAI(
+            api_key=self.config["api_key"], base_url=self.config["api_url"]
+        )
+
+        print(f"Using API URL: {self.config['api_url']}")
+        print(f"Using model: {self.config['model']}")
+
+        model_name = self.config["model"].lower()
+        is_qwen = "qwen" in model_name
+        is_dashscope = "dashscope" in self.config["api_url"].lower()
+        use_streaming = is_qwen or model_name.endswith("-omni-7b")
+
+        try:
+            if is_qwen or is_dashscope:
+                image_url = {"url": f"data:image/jpeg;base64,{image_base64}"}
+            else:
+                image_url = {
+                    "url": f"data:image/jpeg;base64,{image_base64}",
+                    "detail": "high",
+                }
+
+            system_message = {
+                "role": "system",
+                "content": "You are a helpful assistant.",
+            }
+
+            user_message = {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": self.config["prompt"]},
+                    {"type": "image_url", "image_url": image_url},
+                ],
+            }
+
+            if use_streaming:
+                response = client.chat.completions.create(
+                    model=self.config["model"],
+                    messages=[system_message, user_message],
+                    max_tokens=1000,
+                    stream=True,
+                    timeout=30,
+                )
+
+                full_response = ""
+                for chunk in response:
+                    if chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        full_response += content
+                        self.api_response_ready.emit(full_response)
+
+                if not full_response:
+                    self.api_response_ready.emit(
+                        "No response content received."
+                    )
+
+            else:
+                response = client.chat.completions.create(
+                    model=self.config["model"],
+                    messages=[system_message, user_message],
+                    max_tokens=1000,
+                    timeout=30,
+                )
+
+                result = response.choices[0].message.content
+                self.api_response_ready.emit(result)
+
+        except Exception as e:
+            error_message = f"API Request Error: {str(e)}"
             print(error_message)
             self.api_response_ready.emit(error_message)
 
