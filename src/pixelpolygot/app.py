@@ -5,241 +5,40 @@ Reads text from game screenshot and translate to English.
 import importlib.metadata
 import sys
 import os
-import json
-import base64
+import sys # Keep sys for main()
 from pathlib import Path
-import time
-from threading import Thread
 
 from PySide6 import QtWidgets, QtCore, QtGui
-from PySide6.QtGui import QIcon
-from PySide6.QtCore import QTimer, Signal, Slot, QFileSystemWatcher
-import openai
+from PySide6.QtGui import QIcon, QAction # Explicitly import QAction
+from PySide6.QtCore import Signal, Slot, QTimer
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
-DEFAULT_CONFIG = {
-    "api_key": "<YOUR_API_KEY_HERE>",
-    "api_url": "http://localhost:9009/v1",
-    "model": "qwen2.5-vl-7b-instruct",
-    "prompt": "What is the Japanese text in this image and what does it mean in English?",
-    "api_type": "openai",
-}
-
-
-class FileWatcher(QtCore.QObject):
-    file_changed = Signal(str)
-
-    def __init__(self, directory):
-        super().__init__()
-        self.watcher = QFileSystemWatcher()
-        self.directory = directory
-        self.watcher.addPath(directory)
-        self.watcher.directoryChanged.connect(self.on_directory_changed)
-        self.known_files = set(self.get_image_files())
-        self.processing_timer = QTimer()
-        self.processing_timer.setSingleShot(True)
-        self.processing_timer.timeout.connect(self.process_new_files)
-        print(f"Watching {directory} for changes")
-
-    def get_image_files(self):
-        image_extensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
-        return [
-            os.path.join(self.directory, f)
-            for f in os.listdir(self.directory)
-            if os.path.isfile(os.path.join(self.directory, f))
-            and os.path.splitext(f)[1].lower() in image_extensions
-        ]
-
-    def on_directory_changed(self, path):
-        # Start a timer to delay processing by a short amount
-        # This allows the screenshot to finish saving
-        self.processing_timer.start(500)  # 500ms delay
-
-    def process_new_files(self):
-        try:
-            current_files = set(self.get_image_files())
-            new_files = current_files - self.known_files
-
-            if new_files:
-                # Sort by creation time to get the newest
-                newest_file = sorted(new_files, key=os.path.getctime, reverse=True)[0]
-
-                # Verify file is not empty and accessible
-                if os.path.getsize(newest_file) > 0:
-                    # Additional small delay to ensure file is fully written
-                    time.sleep(0.2)
-                    self.file_changed.emit(newest_file)
-                    print(f"New image detected: {newest_file}")
-                else:
-                    # If file appears to be empty, try again after a delay
-                    QTimer.singleShot(500, lambda: self.check_file_again(newest_file))
-
-            self.known_files = current_files
-        except Exception as e:
-            print(f"Error processing new files: {e}")
-
-    def check_file_again(self, file_path):
-        # Second attempt to read the file after a delay
-        try:
-            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                self.file_changed.emit(file_path)
-                print(f"New image detected (retry): {file_path}")
-                self.known_files = set(self.get_image_files())
-        except Exception as e:
-            print(f"Error in second attempt to read file: {e}")
-
-
-class SettingsDialog(QtWidgets.QDialog):
-    def __init__(self, config, parent=None):
-        super().__init__(parent)
-        self.config = config
-        self.setWindowTitle("Settings")
-        self.setMinimumWidth(400)
-
-        layout = QtWidgets.QVBoxLayout(self)
-
-        form_layout = QtWidgets.QFormLayout()
-
-        # API Type
-        self.api_type_combo = QtWidgets.QComboBox()
-        self.api_type_combo.addItems(["OpenAI", "Ollama"])
-        self.api_type_combo.setCurrentText(
-            self.config.get("api_type", "openai").title()
-        )
-        self.api_type_combo.setToolTip(
-            "Select the type of API to use:\nOpenAI - For OpenAI compatible APIs\nOllama - For local Ollama instance"
-        )
-        form_layout.addRow("API Type:", self.api_type_combo)
-
-        # API URL
-        self.api_url_input = QtWidgets.QLineEdit(self.config["api_url"])
-        self.api_url_input.setToolTip(
-            "Must be a OpenAI compatabile API for the image to send."
-        )
-        form_layout.addRow("API URL:", self.api_url_input)
-
-        # API Key
-        self.api_key_input = QtWidgets.QLineEdit(self.config["api_key"])
-        self.api_key_input.setToolTip(
-            "Your unique API key from your provider.\nCan be left black if self hosting typically."
-        )
-        self.api_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-        self.show_api_key_checkbox = QtWidgets.QCheckBox("Show")
-        self.show_api_key_checkbox.toggled.connect(self.toggle_api_key_echo)
-        api_key_layout = QtWidgets.QHBoxLayout()
-        api_key_layout.addWidget(self.api_key_input)
-        api_key_layout.addWidget(self.show_api_key_checkbox)
-        form_layout.addRow("API Key:", api_key_layout)
-
-        # Model
-        self.model_input = QtWidgets.QLineEdit(self.config["model"])
-        self.model_input.setToolTip(
-            "Single name of the model you to send the image to.\nSee you API docs for a list of model names that support vision."
-        )
-        form_layout.addRow("Model:", self.model_input)
-
-        # Prompt
-        self.prompt_input = QtWidgets.QTextEdit()
-        self.prompt_input.setToolTip(
-            "Instructions that get sent to the model.\n'Better' prompt, 'better' results."
-        )
-        self.prompt_input.setPlainText(self.config["prompt"])
-        self.prompt_input.setMinimumHeight(100)
-        form_layout.addRow("Prompt:", self.prompt_input)
-
-        # Watch Directory
-        self.directory_layout = QtWidgets.QHBoxLayout()
-        self.directory_input = QtWidgets.QLineEdit(
-            self.config.get("watch_directory", "")
-        )
-        self.directory_input.setToolTip(
-            "Only watches when new images get placed for auto upload/translation."
-        )
-        self.directory_button = QtWidgets.QPushButton("Browse...")
-        self.directory_button.clicked.connect(self.select_directory)
-        self.directory_layout.addWidget(self.directory_input)
-        self.directory_layout.addWidget(self.directory_button)
-        form_layout.addRow("Watch Directory:", self.directory_layout)
-
-        layout.addLayout(form_layout)
-
-        # Buttons
-        button_box = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok
-            | QtWidgets.QDialogButtonBox.Cancel
-            | QtWidgets.QDialogButtonBox.RestoreDefaults
-        )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        button_box.button(QtWidgets.QDialogButtonBox.RestoreDefaults).clicked.connect(
-            self.restore_defaults
-        )
-        layout.addWidget(button_box)
-
-    def toggle_api_key_echo(self, checked):
-        if checked:
-            self.api_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Normal)
-        else:
-            self.api_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-
-    def select_directory(self):
-        directory = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Select Directory to Watch", self.directory_input.text()
-        )
-        if directory:
-            self.directory_input.setText(directory)
-
-    def restore_defaults(self):
-        """Reset all settings to their default values."""
-        self.api_type_combo.setCurrentIndex(0)  # Force reset to first item (OpenAI)
-        self.api_url_input.setText(DEFAULT_CONFIG["api_url"])
-        self.api_key_input.setText(DEFAULT_CONFIG["api_key"])
-        self.model_input.setText(DEFAULT_CONFIG["model"])
-        self.prompt_input.setPlainText(DEFAULT_CONFIG["prompt"])
-        self.directory_input.setText("")
-
-    def get_settings(self):
-        return {
-            "api_key": self.api_key_input.text(),
-            "api_url": self.api_url_input.text(),
-            "model": self.model_input.text(),
-            "prompt": self.prompt_input.toPlainText(),
-            "watch_directory": self.directory_input.text(),
-            "api_type": self.api_type_combo.currentText().lower(),
-        }
+# Import new modules
+from . import config
+from . import file_watcher
+from . import settings_dialog
+from . import api_client
 
 
 class PixelPolygot(QtWidgets.QMainWindow):
-    api_response_ready = Signal(str)
 
     def __init__(self):
         super().__init__()
         self.current_image_path = None
-        self.config = self.load_config()
+        self.config = config.load_config()
+        self.api_client = api_client.ApiClient(self.config) # Instantiate ApiClient
         self.init_ui()
         self.setup_watcher()
+        self.connect_signals() # Connect signals after UI is initialized
 
-    def load_config(self):
-        try:
-            if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE, "r") as f:
-                    return json.load(f)
-            else:
-                return DEFAULT_CONFIG.copy()
-        except Exception as e:
-            print(f"Error loading config: {e}")
-            return DEFAULT_CONFIG.copy()
-
-    def save_config(self):
-        try:
-            with open(CONFIG_FILE, "w") as f:
-                json.dump(self.config, f)
-        except Exception as e:
-            print(f"Error saving config: {e}")
 
     def init_ui(self):
         self.setWindowTitle("PixelPolygot")
-        self.setWindowIcon(QIcon("resources/PixelPolygot.png"))
+        # Try loading icon relative to this file's location
+        icon_path = os.path.join(os.path.dirname(__file__), "resources", "PixelPolygot.png")
+        if os.path.exists(icon_path):
+             self.setWindowIcon(QIcon(icon_path))
+        else:
+             print(f"Warning: Icon file not found at {icon_path}")
         self.resize(800, 600)
 
         # Central widget
@@ -285,50 +84,71 @@ class PixelPolygot(QtWidgets.QMainWindow):
         file_menu = menu_bar.addMenu("File")
 
         # Open image action
-        open_action = QtGui.QAction("Open Image", self)
+        open_action = QAction("Open Image", self) # Use imported QAction
         open_action.triggered.connect(self.open_image)
         file_menu.addAction(open_action)
 
         # Settings action
-        settings_action = QtGui.QAction("Settings", self)
+        settings_action = QAction("Settings", self) # Use imported QAction
         settings_action.triggered.connect(self.show_settings)
         file_menu.addAction(settings_action)
 
         # Exit action
-        exit_action = QtGui.QAction("Exit", self)
+        exit_action = QAction("Exit", self) # Use imported QAction
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # Connect signals
-        self.api_response_ready.connect(self.update_output_text)
 
-        self.show()
+    def connect_signals(self):
+        """Connect signals from components."""
+        self.api_client.api_response_ready.connect(self.update_output_text)
+        self.api_client.api_error.connect(self.handle_api_error)
+        # Connect file watcher signal if watcher exists
+        if hasattr(self, 'watcher') and self.watcher:
+             self.watcher.file_changed.connect(self.on_new_image)
 
     def setup_watcher(self):
-        # Only set up watcher if directory is configured
-        if "watch_directory" in self.config and os.path.exists(
-            self.config["watch_directory"]
-        ):
-            self.watcher = FileWatcher(self.config["watch_directory"])
-            self.watcher.file_changed.connect(self.on_new_image)
-            self.statusBar().showMessage(
-                f"Watching {self.config['watch_directory']} for new images"
-            )
-        else:
-            self.statusBar().showMessage(
-                "No watch directory configured. Go to Settings to set one."
-            )
+        # Reset watcher if it exists
+        if hasattr(self, 'watcher') and self.watcher:
+            self.watcher.deleteLater() # Clean up old watcher
+            self.watcher = None
+
+        watch_dir = self.config.get("watch_directory")
+        if watch_dir and os.path.isdir(watch_dir): # Check if it's a directory
+            try:
+                self.watcher = file_watcher.FileWatcher(watch_dir)
+                self.statusBar().showMessage(
+                     f"Watching {watch_dir} for new images"
+                )
+            except Exception as e:
+                 print(f"Error initializing file watcher for {watch_dir}: {e}")
+                 self.statusBar().showMessage(f"Error starting watcher for {watch_dir}")
+                 self.watcher = None # Ensure watcher is None on error
+        elif watch_dir:
+             self.statusBar().showMessage(f"Watch directory '{watch_dir}' not found or invalid.")
+        else: # Covers case where watch_dir is empty or invalid path from above
+             self.statusBar().showMessage(
+                 "No watch directory configured or directory invalid. Go to Settings to set one."
+             )
 
     def show_settings(self):
-        dialog = SettingsDialog(self.config, self)
+        # Pass a copy of the config to avoid modifying it if Cancel is clicked
+        dialog = settings_dialog.SettingsDialog(self.config.copy(), self)
         if dialog.exec():
             old_directory = self.config.get("watch_directory", "")
             self.config = dialog.get_settings()
-            self.save_config()
+            config.save_config(self.config) # Use config module's save function
+            self.api_client.config = self.config # Update ApiClient's config
 
             # If directory changed, update the watcher
-            if old_directory != self.config["watch_directory"]:
+            new_directory = self.config.get("watch_directory", "")
+            if old_directory != new_directory:
                 self.setup_watcher()
+                # Reconnect signal if watcher was created
+                if hasattr(self, 'watcher') and self.watcher:
+                    # Reconnect the signal from the new watcher instance
+                    self.watcher.file_changed.connect(self.on_new_image)
+
 
     def open_image(self):
         file_name, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -380,149 +200,26 @@ class PixelPolygot(QtWidgets.QMainWindow):
             )
 
     def send_to_api(self, file_path):
-        # Avoid blocking UI
+        """Initiates the API request using the ApiClient."""
         self.output_text.setPlainText("Processing image with API...")
+        self.statusBar().showMessage(f"Sending {os.path.basename(file_path)} to API...")
+        self.api_client.process_image_in_thread(file_path)
 
-        # Run in a separate thread
-        thread = Thread(target=self._api_request, args=(file_path,))
-        thread.daemon = True
-        thread.start()
 
-    def _api_request(self, file_path):
-        try:
-            image_base64 = self._read_image_base64(file_path)
-            if self.config["api_type"] == "ollama":
-                self._request_ollama(image_base64)
-            else:
-                self._request_openai(image_base64)
-        except Exception as e:
-            error_message = f"Error: {str(e)}"
-            print(error_message)
-            self.api_response_ready.emit(error_message)
-
-    def _read_image_base64(self, file_path):
-        with open(file_path, "rb") as image_file:
-            image_data = image_file.read()
-        return base64.b64encode(image_data).decode("utf-8")
-
-    def _request_ollama(self, image_base64):
-        import requests
-
-        api_url = f"{self.config['api_url'].rstrip('/')}/api/chat"
-        payload = {
-            "model": self.config["model"],
-            "messages": [
-                {
-                    "role": "user",
-                    "content": self.config["prompt"],
-                    "images": [image_base64],
-                }
-            ],
-            "stream": True,
-        }
-
-        try:
-            response = requests.post(api_url, json=payload, stream=True, timeout=30)
-            response.raise_for_status()
-
-            full_response = ""
-            for line in response.iter_lines():
-                if line:
-                    try:
-                        json_response = json.loads(line)
-                        if json_response.get("message", {}).get("content"):
-                            content = json_response["message"]["content"]
-                            full_response += content
-                            self.api_response_ready.emit(full_response)
-                    except json.JSONDecodeError:
-                        continue
-
-            if not full_response:
-                self.api_response_ready.emit(
-                    "No response content received from Ollama."
-                )
-
-        except requests.exceptions.RequestException as e:
-            error_message = f"Ollama API Request Error: {str(e)}"
-            print(error_message)
-            self.api_response_ready.emit(error_message)
-
-    def _request_openai(self, image_base64):
-        client = openai.OpenAI(
-            api_key=self.config["api_key"], base_url=self.config["api_url"]
-        )
-
-        print(f"Using API URL: {self.config['api_url']}")
-        print(f"Using model: {self.config['model']}")
-
-        model_name = self.config["model"].lower()
-        is_qwen = "qwen" in model_name
-        is_dashscope = "dashscope" in self.config["api_url"].lower()
-        use_streaming = is_qwen or model_name.endswith("-omni-7b")
-
-        try:
-            if is_qwen or is_dashscope:
-                image_url = {"url": f"data:image/jpeg;base64,{image_base64}"}
-            else:
-                image_url = {
-                    "url": f"data:image/jpeg;base64,{image_base64}",
-                    "detail": "high",
-                }
-
-            system_message = {
-                "role": "system",
-                "content": "You are a helpful assistant.",
-            }
-
-            user_message = {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": self.config["prompt"]},
-                    {"type": "image_url", "image_url": image_url},
-                ],
-            }
-
-            if use_streaming:
-                response = client.chat.completions.create(
-                    model=self.config["model"],
-                    messages=[system_message, user_message],
-                    max_tokens=1000,
-                    stream=True,
-                    timeout=30,
-                )
-
-                full_response = ""
-                for chunk in response:
-                    if chunk.choices[0].delta.content:
-                        content = chunk.choices[0].delta.content
-                        full_response += content
-                        self.api_response_ready.emit(full_response)
-
-                if not full_response:
-                    self.api_response_ready.emit(
-                        "No response content received."
-                    )
-
-            else:
-                response = client.chat.completions.create(
-                    model=self.config["model"],
-                    messages=[system_message, user_message],
-                    max_tokens=1000,
-                    timeout=30,
-                )
-
-                result = response.choices[0].message.content
-                self.api_response_ready.emit(result)
-
-        except Exception as e:
-            error_message = f"API Request Error: {str(e)}"
-            print(error_message)
-            self.api_response_ready.emit(error_message)
+    @Slot(str)
+    def handle_api_error(self, error_message):
+        """Handles errors emitted by the ApiClient."""
+        self.output_text.setPlainText(f"Error: {error_message}")
+        self.statusBar().showMessage(f"API Error: {error_message[:100]}") # Show truncated error
 
     @Slot(str)
     def update_output_text(self, text):
         self.output_text.setPlainText(text)
-        self.statusBar().showMessage("Response received from API")
+        # Check if text starts with "Error:" to provide better status
+        if text.startswith("Error:"):
+             self.statusBar().showMessage("API Error occurred")
+        else:
+             self.statusBar().showMessage("Response received from API")
 
     def regenerate_response(self):
         if self.current_image_path:
@@ -552,5 +249,6 @@ def main():
     QtWidgets.QApplication.setApplicationName(metadata["Formal-Name"])
     app = QtWidgets.QApplication(sys.argv)
     main_window = PixelPolygot()
+    main_window.show()
     sys.exit(app.exec())
 
