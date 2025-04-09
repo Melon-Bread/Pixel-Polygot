@@ -214,7 +214,7 @@ class PixelPolygot(QtWidgets.QMainWindow):
 
     @Slot(str)
     def update_output_text(self, text):
-        self.output_text.setPlainText(text)
+        self.output_text.setMarkdown(text)
         # Check if text starts with "Error:" to provide better status
         if text.startswith("Error:"):
              self.statusBar().showMessage("API Error occurred")
