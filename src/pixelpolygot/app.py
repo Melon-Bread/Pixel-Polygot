@@ -9,6 +9,7 @@ import sys # Keep sys for main()
 from pathlib import Path
 
 from PySide6 import QtWidgets, QtCore, QtGui
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QSizePolicy # Added QComboBox, QHBoxLayout, QSizePolicy
 from PySide6.QtGui import QIcon, QAction # Explicitly import QAction
 from PySide6.QtCore import Signal, Slot, QTimer
 
@@ -63,6 +64,11 @@ class PixelPolygot(QtWidgets.QMainWindow):
         font = QtGui.QFont("Segoe UI", 10)
         self.output_text.setFont(font)
 
+        # Prompt Dropdown
+        self.prompt_dropdown = QtWidgets.QComboBox()
+        self.prompt_dropdown.setToolTip("Select a system prompt to use for the API request.")
+        self._populate_prompts_dropdown() # Populate the dropdown
+
         # Regenerate button
         self.regenerate_button = QtWidgets.QPushButton("Regenerate Response")
         self.regenerate_button.setToolTip(
@@ -70,6 +76,14 @@ class PixelPolygot(QtWidgets.QMainWindow):
         )
         self.regenerate_button.clicked.connect(self.regenerate_response)
         self.regenerate_button.setEnabled(False)
+        # Make the button expand horizontally
+        self.regenerate_button.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+
+        # Button Layout (Horizontal)
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addWidget(self.prompt_dropdown)
+        button_layout.addWidget(self.regenerate_button)
+        # button_layout.addStretch(1) # Removed stretch to allow button expansion
 
         # Status bar
         self.statusBar().showMessage("Ready")
@@ -77,7 +91,8 @@ class PixelPolygot(QtWidgets.QMainWindow):
         # Add widgets to layout
         main_layout.addWidget(self.image_label, 3)
         main_layout.addWidget(self.output_text, 2)
-        main_layout.addWidget(self.regenerate_button)
+        # main_layout.addWidget(self.regenerate_button) # Replaced by button_layout
+        main_layout.addLayout(button_layout) # Add the horizontal layout
 
         # Menu bar
         menu_bar = self.menuBar()
@@ -99,9 +114,35 @@ class PixelPolygot(QtWidgets.QMainWindow):
         file_menu.addAction(exit_action)
 
 
+    def _populate_prompts_dropdown(self):
+        """Populates the prompt dropdown with files from the prompts directory."""
+        self.prompt_dropdown.clear() # Clear existing items
+        prompts_dir = os.path.join(os.path.dirname(__file__), "prompts")
+        found_prompts = False
+        if os.path.isdir(prompts_dir):
+            try:
+                # Sort files alphabetically for consistent order
+                for filename in sorted(os.listdir(prompts_dir)):
+                    full_path = os.path.join(prompts_dir, filename)
+                    if os.path.isfile(full_path):
+                        # Use filename without extension as display text
+                        display_name, _ = os.path.splitext(filename)
+                        # Store the full path as data associated with the item
+                        self.prompt_dropdown.addItem(display_name, full_path)
+                        found_prompts = True
+            except OSError as e:
+                print(f"Error reading prompts directory {prompts_dir}: {e}")
+                self.statusBar().showMessage(f"Error reading prompts directory: {e}")
+
+        if not found_prompts:
+            # Add Default item with None data if no prompts found or dir missing/error
+            self.prompt_dropdown.addItem("Default", None)
+
+
     def connect_signals(self):
         """Connect signals from components."""
-        self.api_client.api_response_ready.connect(self.update_output_text)
+        self.api_client.api_response_ready.connect(self.update_output_text) # For final response
+        self.api_client.api_partial_response.connect(self.handle_partial_response) # For streaming updates
         self.api_client.api_error.connect(self.handle_api_error)
         # Connect file watcher signal if watcher exists
         if hasattr(self, 'watcher') and self.watcher:
@@ -200,10 +241,46 @@ class PixelPolygot(QtWidgets.QMainWindow):
             )
 
     def send_to_api(self, file_path):
-        """Initiates the API request using the ApiClient."""
-        self.output_text.setPlainText("Processing image with API...")
+        """Initiates the API request using the ApiClient, including selected prompt."""
+        # Clear the output text box before starting a new request
+        self.output_text.clear()
+        # self.output_text.setPlainText("Processing image with API...") # Removed - partial updates will handle this
         self.statusBar().showMessage(f"Sending {os.path.basename(file_path)} to API...")
-        self.api_client.process_image_in_thread(file_path)
+
+        prompt_content = None
+        prompt_path = self.prompt_dropdown.currentData() # Get full path from data
+
+        if prompt_path and os.path.exists(prompt_path):
+            try:
+                # Specify UTF-8 encoding for broader compatibility
+                with open(prompt_path, 'r', encoding='utf-8') as f:
+                    prompt_content = f.read()
+                # Optional: Log which prompt is being used
+                print(f"Using prompt: {os.path.basename(prompt_path)}")
+            except IOError as e:
+                error_msg = f"Error reading prompt file {os.path.basename(prompt_path)}: {e}"
+                print(error_msg)
+                self.statusBar().showMessage(error_msg)
+                # Decide if you want to proceed without prompt or stop
+                # Proceeding without prompt for now:
+                prompt_content = None
+            except Exception as e: # Catch other potential errors like decoding errors
+                error_msg = f"Unexpected error reading prompt {os.path.basename(prompt_path)}: {e}"
+                print(error_msg)
+                self.statusBar().showMessage(error_msg)
+                prompt_content = None
+        elif prompt_path:
+             # Path stored but file doesn't exist (maybe deleted after population?)
+             error_msg = f"Prompt file not found: {os.path.basename(prompt_path)}"
+             print(error_msg)
+             self.statusBar().showMessage(error_msg)
+             # Ensure prompt_content is None if file not found
+             prompt_content = None
+        # If prompt_path was None (e.g., "Default" selected), prompt_content remains None
+
+        # Pass prompt_content (which might be None) to the API client method
+        # Ensure the API client method is updated to accept this keyword argument
+        self.api_client.process_image_in_thread(file_path, prompt_content=prompt_content)
 
 
     @Slot(str)
@@ -211,6 +288,14 @@ class PixelPolygot(QtWidgets.QMainWindow):
         """Handles errors emitted by the ApiClient."""
         self.output_text.setPlainText(f"Error: {error_message}")
         self.statusBar().showMessage(f"API Error: {error_message[:100]}") # Show truncated error
+
+
+    @Slot(str)
+    def handle_partial_response(self, text):
+        """Handles partial updates during streaming, using plain text."""
+        self.output_text.setPlainText(text)
+        # Optionally update status bar during streaming
+        # self.statusBar().showMessage("Receiving response...")
 
     @Slot(str)
     def update_output_text(self, text):

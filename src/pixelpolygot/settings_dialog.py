@@ -58,11 +58,11 @@ class SettingsDialog(QDialog):
         # Prompt
         self.prompt_input = QTextEdit()
         self.prompt_input.setToolTip(
-            "Instructions that get sent to the model.\n'Better' prompt, 'better' results."
+            "The fallback prompt that gets used if empty prompt folder."
         )
         self.prompt_input.setPlainText(self.config.get("prompt", DEFAULT_CONFIG["prompt"]))
         self.prompt_input.setMinimumHeight(100)
-        form_layout.addRow("Prompt:", self.prompt_input)
+        form_layout.addRow("Fallback Prompt:", self.prompt_input)
 
         # Watch Directory
         self.directory_layout = QHBoxLayout()

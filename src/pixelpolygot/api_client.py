@@ -8,7 +8,8 @@ from PySide6.QtCore import Signal, QObject # Need QObject for signals
 
 
 class ApiClient(QObject): # Inherit from QObject to use signals
-    api_response_ready = Signal(str)
+    api_response_ready = Signal(str) # Emitted when the full response is ready (or for non-streaming)
+    api_partial_response = Signal(str) # Emitted during streaming for partial updates
     api_error = Signal(str)
 
     def __init__(self, config):
@@ -24,15 +25,17 @@ class ApiClient(QObject): # Inherit from QObject to use signals
         except Exception as e:
             raise IOError(f"Failed to read image file {file_path}: {e}") from e
 
-    def _request_ollama(self, image_base64):
+    def _request_ollama(self, image_base64, prompt_content=None):
         """Sends a request to the Ollama API and emits signals with the response."""
         api_url = f"{self.config['api_url'].rstrip('/')}/api/chat"
+        # Use provided prompt_content if available, otherwise fallback to config
+        user_prompt = prompt_content if prompt_content is not None else self.config["prompt"]
         payload = {
             "model": self.config["model"],
             "messages": [
                 {
                     "role": "user",
-                    "content": self.config["prompt"],
+                    "content": user_prompt, # Use the determined prompt
                     "images": [image_base64],
                 }
             ],
@@ -55,7 +58,7 @@ class ApiClient(QObject): # Inherit from QObject to use signals
                         if message := json_response.get("message"):
                              if content := message.get("content"):
                                 full_response += content
-                                self.api_response_ready.emit(full_response) # Emit partial response
+                                self.api_partial_response.emit(full_response) # Emit partial response update
 
                     except json.JSONDecodeError:
                         print(f"Warning: Could not decode JSON line: {line}")
@@ -65,8 +68,16 @@ class ApiClient(QObject): # Inherit from QObject to use signals
                          self.api_error.emit(f"Error processing Ollama stream: {str(e)}")
                          return # Stop processing on error
 
-            if not full_response and not response.content: # Check if response was truly empty
-                 self.api_error.emit("No response content received from Ollama.")
+            # After loop finishes successfully, emit the final complete response
+            if full_response:
+                self.api_response_ready.emit(full_response)
+            elif not response.content: # Check if response was truly empty and no error occurred
+                self.api_error.emit("No response content received from Ollama.")
+
+        except requests.RequestException as e:
+            self.api_error.emit(f"Request failed: {str(e)}")
+        except Exception as e:
+            self.api_error.emit(f"Unexpected error: {str(e)}")
 
 
         except requests.exceptions.RequestException as e:
@@ -79,7 +90,7 @@ class ApiClient(QObject): # Inherit from QObject to use signals
             self.api_error.emit(error_message)
 
 
-    def _request_openai(self, image_base64):
+    def _request_openai(self, image_base64, prompt_content=None):
         """Sends a request to an OpenAI-compatible API and emits signals with the response."""
         try:
             client = openai.OpenAI(
@@ -111,10 +122,12 @@ class ApiClient(QObject): # Inherit from QObject to use signals
                 "content": "You are a helpful assistant.",
             }
 
+            # Use provided prompt_content if available, otherwise fallback to config
+            user_prompt = prompt_content if prompt_content is not None else self.config["prompt"]
             user_message = {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": self.config["prompt"]},
+                    {"type": "text", "text": user_prompt}, # Use the determined prompt
                     {"type": "image_url", "image_url": image_url_payload},
                 ],
             }
@@ -135,10 +148,12 @@ class ApiClient(QObject): # Inherit from QObject to use signals
                     if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
                         full_response += content
-                        self.api_response_ready.emit(full_response) # Emit partial response
-
-                if not full_response:
-                     self.api_error.emit("No response content received from API (streaming).")
+                        self.api_partial_response.emit(full_response) # Emit partial response update
+                # After loop finishes successfully, emit the final complete response
+                if full_response:
+                    self.api_response_ready.emit(full_response)
+                else:  # Stream finished but no content received
+                    self.api_error.emit("No response content received from API (streaming).")
 
             else: # Non-streaming request
                 response = client.chat.completions.create(
@@ -172,22 +187,25 @@ class ApiClient(QObject): # Inherit from QObject to use signals
             self.api_error.emit(error_message)
 
 
-    def process_image_in_thread(self, file_path):
+    def process_image_in_thread(self, file_path, prompt_content=None):
         """Handles the API request in a separate thread."""
-        thread = Thread(target=self._api_request_thread_target, args=(file_path,))
+        # Pass prompt_content to the target function
+        thread = Thread(target=self._api_request_thread_target, args=(file_path, prompt_content))
         thread.daemon = True
         thread.start()
 
-    def _api_request_thread_target(self, file_path):
+    def _api_request_thread_target(self, file_path, prompt_content=None):
         """Target function for the API request thread."""
         try:
             image_base64 = self._read_image_base64(file_path)
             api_type = self.config.get("api_type", "openai").lower() # Default to openai
 
             if api_type == "ollama":
-                self._request_ollama(image_base64)
+                # Pass prompt_content down
+                self._request_ollama(image_base64, prompt_content=prompt_content)
             elif api_type == "openai":
-                self._request_openai(image_base64)
+                # Pass prompt_content down
+                self._request_openai(image_base64, prompt_content=prompt_content)
             else:
                  raise ValueError(f"Unsupported API type: {api_type}")
 
