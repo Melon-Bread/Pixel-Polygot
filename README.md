@@ -7,6 +7,8 @@
 
 Pixel-Polygot is a desktop application designed to read text from game screenshots and translate it into English using AI vision models.
 
+![ScreenShot](docs/screenshots/quick-show.gif)
+
 ![Demo Video](docs/video/demo.mp4)
 
 ## Features
