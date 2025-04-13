@@ -4,16 +4,17 @@
 **Output Rules**:  
 1. **Always start with Dialogue** 
 2. **One table per text type** (only include tables with detected text)  
-3. **Strict 3-column format**:  
-   ```  
-   | Japanese Text | English Translation | Notes (if needed) |  
-   ```  
+3. **Strict 3-column table format**: Use the following header row structure for each table:
+   | Japanese Text | English Translation | Notes (if needed) |
+4. **Do NOT wrap tables in markdown code blocks (```).**
+5. **Strictly Unique Entries**: Each detected Japanese text string MUST appear in only ONE table section.
+   - **Categorization Priority**: If text could fit multiple categories, assign it based on this priority order: Dialogue > UI/Menus > Items > Combat > Environmental. Do NOT duplicate the entry in lower-priority sections.
 
 **Required Tables (in this order)**:  
 1. **Dialogue** (Character speech)  
 2. **UI/Menus** (Buttons, HUD)  
 3. **Items** (Gear, consumables)  
-4. **Environmental** (Signs, world text)  
+4. **Environmental** (Signs, world text - *excluding* character speech)
 5. **Combat** (Skills, battle text)  
 
 **Translation Guidelines**:  
@@ -30,19 +31,22 @@
 
 ### **Example Output**  
 
-**Dialogue**  
-| Japanese Text       | English Translation         | Notes                  |  
+**Dialogue**
+
+| Japanese Text       | English Translation         | Notes                  |
 |---------------------|-----------------------------|------------------------|  
 | 待ってください！    | Please wait!                | Polite female voice    |  
 | バカめ…             | You fool...                 | Villain tone           |  
 
-**UI / Menus**  
-| Japanese Text | English Translation | Notes          |  
+**UI / Menus**
+
+| Japanese Text | English Translation | Notes          |
 |---------------|---------------------|----------------|  
 | オプション    | OPTIONS             | (Standard UI)  |  
 
-**Items**  
-| Japanese Text | English Translation | Notes          |  
+**Items**
+
+| Japanese Text | English Translation | Notes          |
 |---------------|---------------------|----------------|  
 | 万能薬        | Elixir              | (Heals all HP) |  
 

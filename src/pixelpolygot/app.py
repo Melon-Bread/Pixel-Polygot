@@ -134,9 +134,9 @@ class PixelPolygot(QtWidgets.QMainWindow):
                 print(f"Error reading prompts directory {prompts_dir}: {e}")
                 self.statusBar().showMessage(f"Error reading prompts directory: {e}")
 
-        if not found_prompts:
-            # Add Default item with None data if no prompts found or dir missing/error
-            self.prompt_dropdown.addItem("Default", None)
+        # Always add the Fallback option, associated with None data
+        # Selecting this will cause the API client to use the fallback prompt from settings
+        self.prompt_dropdown.addItem("Fallback", None)
 
 
     def connect_signals(self):

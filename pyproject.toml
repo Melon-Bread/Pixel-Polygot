@@ -2,7 +2,7 @@
 [tool.briefcase]
 project_name = "Pixel-Polygot"
 bundle = "dev.melonbread.pixelpolygot"
-version = "0.0.1"
+version = "0.5.0"
 url = "https://codeberg.org/Melon-Bread/Pixel-Polygot"
 license.file = "LICENSE"
 author = "Melon Bread"
