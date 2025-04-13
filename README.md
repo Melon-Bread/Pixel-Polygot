@@ -116,7 +116,7 @@ To run the application directly from the source code for development or testing:
 
 To create distributable packages for different platforms:
 
-1.  **Prerequisites:** Ensure you have Python 3.x, Briefcase, and the necessary build tools installed (see "Running in Development Mode"). Specific platforms might have additional requirements (e.g., Docker for Linux AppImage builds on non-Linux systems). Refer to the [Beeware documentation](https://docs.beeware.org/en/latest/reference/platforms/) for platform-specific details.
+1.  **Prerequisites:** Ensure you have Python 3.x, Briefcase, and the necessary build tools installed (see "Running in Development Mode"). Specific platforms might have additional requirements (e.g., Docker for Linux AppImage builds on non-Linux systems). Refer to the [Beeware documentation](https://docs.beeware.org/en/latest/tutorial/tutorial-3.html) for platform-specific details.
 2.  **Build the application bundle:**
     ```bash
     briefcase build <platform>
