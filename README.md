@@ -1,7 +1,7 @@
 # Pixel-Polygot
 
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://python.org)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Packaging: Briefcase](https://img.shields.io/badge/Packaging-Briefcase-ff69b4)](https://briefcase.readthedocs.io)
 ![Platform](https://img.shields.io/badge/platform-Linux%2FmacOS%2FWindows-lightgrey)
 
